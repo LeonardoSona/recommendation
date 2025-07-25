@@ -46,24 +46,53 @@ def parse_list_string(list_str):
     except:
         return []
 
-def save_feedback(user_id, product_id, feedback, timestamp):
-    """Save feedback to CSV file"""
+def save_feedback(user_id, product_id, feedback):
+    """Save or update feedback to CSV file (latest vote only)"""
     feedback_entry = {
         'MUDID': user_id,
         'Product_ID': product_id,
-        'Feedback': feedback,  # 1 for thumbs up, -1 for thumbs down
-        'Timestamp': timestamp
+        'Feedback': feedback  # 1 for thumbs up, -1 for thumbs down, 0 to remove vote
     }
     
     # Load existing feedback or create new
     try:
         feedback_df = pd.read_csv('feedback.csv')
-        feedback_df = pd.concat([feedback_df, pd.DataFrame([feedback_entry])], ignore_index=True)
+        
+        # Check if this user-product combination exists
+        mask = (feedback_df['MUDID'] == user_id) & (feedback_df['Product_ID'] == product_id)
+        
+        if mask.any():
+            # Update existing vote
+            if feedback == 0:
+                # Remove vote entirely
+                feedback_df = feedback_df[~mask]
+            else:
+                # Update existing vote
+                feedback_df.loc[mask, 'Feedback'] = feedback
+        else:
+            # Add new vote (only if not removing)
+            if feedback != 0:
+                feedback_df = pd.concat([feedback_df, pd.DataFrame([feedback_entry])], ignore_index=True)
+    
     except FileNotFoundError:
-        feedback_df = pd.DataFrame([feedback_entry])
+        # Create new file (only if not removing)
+        if feedback != 0:
+            feedback_df = pd.DataFrame([feedback_entry])
+        else:
+            feedback_df = pd.DataFrame(columns=['MUDID', 'Product_ID', 'Feedback'])
     
     feedback_df.to_csv('feedback.csv', index=False)
-    st.session_state.feedback_data.append(feedback_entry)
+
+def get_user_vote(user_id, product_id):
+    """Get current vote for user-product pair"""
+    try:
+        feedback_df = pd.read_csv('feedback.csv')
+        mask = (feedback_df['MUDID'] == user_id) & (feedback_df['Product_ID'] == product_id)
+        if mask.any():
+            return feedback_df.loc[mask, 'Feedback'].iloc[0]
+        return 0  # No vote
+    except FileNotFoundError:
+        return 0  # No vote
 
 def display_shap_explanation(shap_data, product_id):
     """Display SHAP explanation for a product"""
@@ -219,16 +248,39 @@ def main():
                 with col_thumbs:
                     thumb_col1, thumb_col2 = st.columns(2)
                     
+                    # Get current vote status
+                    current_vote = get_user_vote(user_input, product_id)
+                    
                     with thumb_col1:
-                        if st.button("👍", key=f"up_{product_id}", help="Like this recommendation"):
-                            save_feedback(user_input, product_id, 1, datetime.now())
-                            st.success("👍")
+                        # Determine button style based on current vote
+                        if current_vote == 1:
+                            button_type = "primary"
+                            button_text = "👍"
+                        else:
+                            button_type = "secondary"
+                            button_text = "👍"
+                        
+                        if st.button(button_text, key=f"up_{product_id}", help="Like this recommendation", 
+                                   type=button_type, use_container_width=True):
+                            # Toggle logic: if already liked, remove vote; otherwise set to like
+                            new_vote = 0 if current_vote == 1 else 1
+                            save_feedback(user_input, product_id, new_vote)
                             st.rerun()
                     
                     with thumb_col2:
-                        if st.button("👎", key=f"down_{product_id}", help="Dislike this recommendation"):
-                            save_feedback(user_input, product_id, -1, datetime.now())
-                            st.success("👎")
+                        # Determine button style based on current vote
+                        if current_vote == -1:
+                            button_type = "primary"
+                            button_text = "👎"
+                        else:
+                            button_type = "secondary" 
+                            button_text = "👎"
+                        
+                        if st.button(button_text, key=f"down_{product_id}", help="Dislike this recommendation", 
+                                   type=button_type, use_container_width=True):
+                            # Toggle logic: if already disliked, remove vote; otherwise set to dislike
+                            new_vote = 0 if current_vote == -1 else -1
+                            save_feedback(user_input, product_id, new_vote)
                             st.rerun()
                 
                 # Add SHAP explanation in a subtle way
@@ -241,33 +293,40 @@ def main():
                     st.divider()
     
     with col2:
-        st.header("📊 Feedback Summary")
+        st.header("📊 Your Feedback")
         
-        # Load and display feedback stats
+        # Load and display user-specific feedback stats
         try:
             feedback_df = pd.read_csv('feedback.csv')
-            if not feedback_df.empty:
-                user_feedback = feedback_df[feedback_df['MUDID'] == user_input]
+            user_feedback = feedback_df[feedback_df['MUDID'] == user_input]
+            
+            if not user_feedback.empty:
+                st.write("**Your Recent Votes:**")
                 
-                if not user_feedback.empty:
-                    st.write("**Your Recent Feedback:**")
-                    for _, row in user_feedback.tail(5).iterrows():
-                        emoji = "👍" if row['Feedback'] == 1 else "👎"
-                        st.write(f"{emoji} Product {row['Product_ID']}")
+                # Show recent votes with product info
+                for _, row in user_feedback.tail(5).iterrows():
+                    emoji = "👍" if row['Feedback'] == 1 else "👎"
+                    st.write(f"{emoji} Product {row['Product_ID']}")
                 
-                # Overall stats
-                st.write("**Overall Statistics:**")
-                total_feedback = len(feedback_df)
-                positive_feedback = len(feedback_df[feedback_df['Feedback'] == 1])
-                negative_feedback = len(feedback_df[feedback_df['Feedback'] == -1])
+                # User-specific stats
+                st.write("**Your Statistics:**")
+                total_votes = len(user_feedback)
+                positive_votes = len(user_feedback[user_feedback['Feedback'] == 1])
+                negative_votes = len(user_feedback[user_feedback['Feedback'] == -1])
                 
-                st.metric("Total Feedback", total_feedback)
-                st.metric("Positive", positive_feedback)
-                st.metric("Negative", negative_feedback)
+                st.metric("Total Votes", total_votes)
+                col_pos, col_neg = st.columns(2)
+                with col_pos:
+                    st.metric("👍 Likes", positive_votes)
+                with col_neg:
+                    st.metric("👎 Dislikes", negative_votes)
                 
-                if total_feedback > 0:
-                    satisfaction_rate = (positive_feedback / total_feedback) * 100
-                    st.metric("Satisfaction Rate", f"{satisfaction_rate:.1f}%")
+                if total_votes > 0:
+                    satisfaction_rate = (positive_votes / total_votes) * 100
+                    st.metric("Your Satisfaction", f"{satisfaction_rate:.0f}%")
+            else:
+                st.info("No votes yet. Start rating recommendations!")
+                
         except FileNotFoundError:
             st.info("No feedback data available yet")
     
@@ -278,15 +337,19 @@ def main():
     col_x, col_y = st.columns(2)
     
     with col_x:
-        if st.button("📥 Download Feedback Data"):
+        if st.button("📥 Download Your Feedback"):
             try:
                 feedback_df = pd.read_csv('feedback.csv')
-                st.download_button(
-                    label="Download CSV",
-                    data=feedback_df.to_csv(index=False),
-                    file_name=f"feedback_data_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
-                    mime="text/csv"
-                )
+                user_feedback = feedback_df[feedback_df['MUDID'] == user_input]
+                if not user_feedback.empty:
+                    st.download_button(
+                        label="Download Your Data",
+                        data=user_feedback.to_csv(index=False),
+                        file_name=f"feedback_{user_input}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
+                        mime="text/csv"
+                    )
+                else:
+                    st.warning("No feedback data to download for this user")
             except FileNotFoundError:
                 st.warning("No feedback data to download")
     
