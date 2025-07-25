@@ -1,4 +1,46 @@
-import streamlit as st
+def get_user_vote(user_id, product_id):
+    """Get current vote for user-product pair"""
+    try:
+        feedback_df = pd.read_csv('feedback.csv')
+        mask = (feedback_df['MUDID'] == user_id) & (feedback_df['Product_ID'] == product_id)
+        if mask.any():
+            return feedback_df.loc[mask, 'Feedback'].iloc[0]
+        return 0  # No vote
+    except FileNotFoundError:
+        return 0  # No vote
+
+def extract_user_from_text(text_input, available_users):
+    """Extract user ID from natural language text input"""
+    if not text_input.strip():
+        return None, None
+    
+    text_lower = text_input.lower().strip()
+    
+    # Direct user ID check - look for exact matches
+    for user in available_users:
+        if str(user).lower() in text_lower:
+            return user, f"Found user ID: {user}"
+    
+    # Look for partial matches (at least 4 characters)
+    for user in available_users:
+        user_str = str(user).lower()
+        if len(user_str) >= 4:
+            for i in range(len(user_str) - 3):
+                substring = user_str[i:i+4]
+                if substring in text_lower:
+                    return user, f"Matched partial ID: {user}"
+    
+    # Common patterns
+    patterns = [
+        "recommend", "suggestion", "show", "get", "find", "what", "give me"
+    ]
+    
+    if any(pattern in text_lower for pattern in patterns):
+        return None, "I understand you want recommendations, but I need a user ID. Try including a user ID in your request or use the dropdown below."
+    
+    return None, f"I couldn't find a matching user ID in your request. Available users: {', '.join(map(str, available_users[:3]))}{'...' if len(available_users) > 3 else ''}"import streamlit as st
+
+
 import pandas as pd
 import json
 import ast
@@ -83,16 +125,36 @@ def save_feedback(user_id, product_id, feedback):
     
     feedback_df.to_csv('feedback.csv', index=False)
 
-def get_user_vote(user_id, product_id):
-    """Get current vote for user-product pair"""
-    try:
-        feedback_df = pd.read_csv('feedback.csv')
-        mask = (feedback_df['MUDID'] == user_id) & (feedback_df['Product_ID'] == product_id)
-        if mask.any():
-            return feedback_df.loc[mask, 'Feedback'].iloc[0]
-        return 0  # No vote
-    except FileNotFoundError:
-        return 0  # No vote
+def extract_user_from_text(text_input, available_users):
+    """Extract user ID from natural language text input"""
+    if not text_input.strip():
+        return None, None
+    
+    text_lower = text_input.lower().strip()
+    
+    # Direct user ID check - look for exact matches
+    for user in available_users:
+        if str(user).lower() in text_lower:
+            return user, f"Found user ID: {user}"
+    
+    # Look for partial matches (at least 4 characters)
+    for user in available_users:
+        user_str = str(user).lower()
+        if len(user_str) >= 4:
+            for i in range(len(user_str) - 3):
+                substring = user_str[i:i+4]
+                if substring in text_lower:
+                    return user, f"Matched partial ID: {user}"
+    
+    # Common patterns
+    patterns = [
+        "recommend", "suggestion", "show", "get", "find", "what", "give me"
+    ]
+    
+    if any(pattern in text_lower for pattern in patterns):
+        return None, "I understand you want recommendations, but I need a user ID. Try including a user ID in your request or use the dropdown below."
+    
+    return None, f"I couldn't find a matching user ID in your request. Available users: {', '.join(map(str, available_users[:3]))}{'...' if len(available_users) > 3 else ''}"
 
 def display_shap_explanation(shap_data, product_id):
     """Display SHAP explanation for a product"""
@@ -148,10 +210,31 @@ def main():
     st.markdown("---")
     
     # Sidebar for user input
-    st.sidebar.header("User Input")
+    st.sidebar.header("🤖 Ask for Recommendations")
     
-    # User ID dropdown with search
+    # Natural language text input
+    text_query = st.sidebar.text_area(
+        "💬 Describe what you want:",
+        placeholder="e.g., 'Show me recommendations for ai730048' or 'What products would you suggest for user ai730048?'",
+        height=100,
+        help="You can ask in natural language! Include a user ID in your request."
+    )
+    
+    # Process text input
     available_users = df['MUDID'].unique().tolist()
+    selected_user_from_text = None
+    text_feedback = None
+    
+    if text_query.strip():
+        selected_user_from_text, text_feedback = extract_user_from_text(text_query, available_users)
+        
+        if selected_user_from_text:
+            st.sidebar.success(text_feedback)
+        else:
+            st.sidebar.warning(text_feedback)
+    
+    st.sidebar.markdown("---")
+    st.sidebar.subheader("📋 Or Select Manually")
     
     # Add search functionality for users
     user_search = st.sidebar.text_input("🔍 Search Users:", placeholder="Type to filter users...")
@@ -164,12 +247,16 @@ def main():
     
     # User dropdown
     if filtered_users:
-        default_index = 0
-        if "ai730048" in filtered_users:
+        # Determine default selection
+        if selected_user_from_text and selected_user_from_text in filtered_users:
+            default_index = filtered_users.index(selected_user_from_text)
+        elif "ai730048" in filtered_users:
             default_index = filtered_users.index("ai730048")
+        else:
+            default_index = 0
         
         user_input = st.sidebar.selectbox(
-            "📋 Select User ID:",
+            "Select User ID:",
             options=filtered_users,
             index=default_index,
             help=f"Found {len(filtered_users)} users"
@@ -178,6 +265,10 @@ def main():
         st.sidebar.warning("No users match your search")
         user_input = None
     
+    # Override with text selection if available
+    if selected_user_from_text:
+        user_input = selected_user_from_text
+    
 
     
     # Main content area
@@ -185,7 +276,11 @@ def main():
     
     with col1:
         if user_input is None:
-            st.warning("Please select a user from the sidebar")
+            st.warning("Please ask for recommendations in the text area or select a user from the sidebar")
+            st.info("💡 **Try these examples:**")
+            st.code("Show me recommendations for ai730048")
+            st.code("What products would you suggest for user ai730048?")
+            st.code("Get recommendations for ai730")
             st.stop()
             
         st.header(f"Recommendations for User: {user_input}")
