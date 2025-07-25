@@ -149,26 +149,7 @@ def main():
         st.sidebar.warning("No users match your search")
         user_input = None
     
-    # Product search/filter options
-    st.sidebar.markdown("---")
-    st.sidebar.subheader("🔍 Product Filters")
-    
-    # Minimum score filter
-    min_score = st.sidebar.slider(
-        "Minimum Final Score:",
-        min_value=0.0,
-        max_value=1.0,
-        value=0.0,
-        step=0.05,
-        help="Filter products by minimum recommendation score"
-    )
-    
-    # Product ID search
-    product_search = st.sidebar.text_input(
-        "Search Product IDs:",
-        placeholder="e.g., 152415, 101115",
-        help="Enter product ID numbers to search for specific products"
-    )
+
     
     # Main content area
     col1, col2 = st.columns([2, 1])
@@ -193,82 +174,71 @@ def main():
             rf_scores = parse_list_string(user_row['RF_Score'])
             cf_scores = parse_list_string(user_row['CF_Score'])
             
-            # Apply filters
-            filtered_products = []
-            filtered_indices = []
-            
-            for i, product_id in enumerate(recommended_products):
-                # Check score filter
-                if i < len(final_scores) and final_scores[i] < min_score:
-                    continue
-                
-                # Check product ID search
-                if product_search and product_search.strip():
-                    search_terms = [term.strip() for term in product_search.split(',')]
-                    if not any(term in str(product_id) for term in search_terms):
-                        continue
-                
-                filtered_products.append(product_id)
-                filtered_indices.append(i)
-            
-            # Display filter results
             total_products = len(recommended_products)
-            filtered_count = len(filtered_products)
+            st.info(f"📦 Found {total_products} recommendations")
             
-            col_info1, col_info2, col_info3 = st.columns(3)
-            with col_info1:
-                st.metric("Total Products", total_products)
-            with col_info2:
-                st.metric("Filtered Products", filtered_count)
-            with col_info3:
-                if total_products > 0:
-                    filter_percentage = (filtered_count / total_products) * 100
-                    st.metric("Showing", f"{filter_percentage:.0f}%")
+            # Add column headers
+            header_col1, header_col2, header_col3, header_col4, header_col5, header_col6 = st.columns([0.5, 1.5, 1, 1, 1, 1.5])
             
-            if not filtered_products:
-                st.warning("No products match your filter criteria")
-                st.info("💡 **Tips:** Lower the minimum score or clear the product search to see more results")
-            else:
-                st.success(f"Found {filtered_count} matching recommendations:")
+            with header_col1:
+                st.write("**Rank**")
+            with header_col2:
+                st.write("**Product ID**")
+            with header_col3:
+                st.write("**Final Score**")
+            with header_col4:
+                st.write("**RF Score**")
+            with header_col5:
+                st.write("**CF Score**")
+            with header_col6:
+                st.write("**Your Feedback**")
+            
+            st.divider()
+            
+            # Display recommendations inline
+            for i, product_id in enumerate(recommended_products):
+                # Create inline display with columns
+                col_rank, col_product, col_final, col_rf, col_cf, col_thumbs = st.columns([0.5, 1.5, 1, 1, 1, 1.5])
                 
-                # Display recommendations
-                for idx, product_id in enumerate(filtered_products):
-                    original_index = filtered_indices[idx]
+                with col_rank:
+                    st.write(f"**#{i+1}**")
+                
+                with col_product:
+                    st.write(f"**Product {product_id}**")
+                
+                with col_final:
+                    score_color = "🟢" if final_scores[i] >= 0.7 else "🟡" if final_scores[i] >= 0.4 else "🔴"
+                    st.write(f"{score_color} {final_scores[i]:.3f}")
+                
+                with col_rf:
+                    st.write(f"{rf_scores[i]:.3f}")
+                
+                with col_cf:
+                    st.write(f"{cf_scores[i]:.3f}")
+                
+                with col_thumbs:
+                    thumb_col1, thumb_col2 = st.columns(2)
                     
-                    # Create a more informative header
-                    score_badge = f"⭐ {final_scores[original_index]:.3f}"
-                    rank_badge = f"#{original_index + 1}"
+                    with thumb_col1:
+                        if st.button("👍", key=f"up_{product_id}", help="Like this recommendation"):
+                            save_feedback(user_input, product_id, 1, datetime.now())
+                            st.success("👍")
+                            st.rerun()
                     
-                    with st.expander(f"📦 {rank_badge} Product ID: {product_id} {score_badge}", expanded=True):
-                        col_a, col_b, col_c = st.columns([2, 1, 1])
-                        
-                        with col_a:
-                            # Score breakdown
-                            st.markdown("**📊 Score Breakdown:**")
-                            score_col1, score_col2, score_col3 = st.columns(3)
-                            
-                            with score_col1:
-                                st.metric("Final Score", f"{final_scores[original_index]:.3f}")
-                            with score_col2:
-                                st.metric("RF Score", f"{rf_scores[original_index]:.3f}")
-                            with score_col3:
-                                st.metric("CF Score", f"{cf_scores[original_index]:.3f}")
-                            
-                            # Display SHAP explanation
-                            st.markdown("---")
-                            display_shap_explanation(user_row['SHAP'], product_id)
-                        
-                        with col_b:
-                            if st.button("👍 Like", key=f"up_{product_id}", help="This recommendation is helpful", use_container_width=True):
-                                save_feedback(user_input, product_id, 1, datetime.now())
-                                st.success("👍 Thanks!")
-                                st.rerun()
-                        
-                        with col_c:
-                            if st.button("👎 Dislike", key=f"down_{product_id}", help="This recommendation is not helpful", use_container_width=True):
-                                save_feedback(user_input, product_id, -1, datetime.now())
-                                st.success("👎 Noted!")
-                                st.rerun()
+                    with thumb_col2:
+                        if st.button("👎", key=f"down_{product_id}", help="Dislike this recommendation"):
+                            save_feedback(user_input, product_id, -1, datetime.now())
+                            st.success("👎")
+                            st.rerun()
+                
+                # Add SHAP explanation in a subtle way
+                if i < 3:  # Show SHAP for top 3 only to avoid clutter
+                    with st.expander(f"🔍 Why Product {product_id}?", expanded=False):
+                        display_shap_explanation(user_row['SHAP'], product_id)
+                
+                # Add separator between products
+                if i < len(recommended_products) - 1:
+                    st.divider()
     
     with col2:
         st.header("📊 Feedback Summary")
