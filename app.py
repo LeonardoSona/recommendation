@@ -38,9 +38,11 @@ def extract_user_from_text(text_input, available_users):
     if any(pattern in text_lower for pattern in patterns):
         return None, "I understand you want recommendations, but I need a user ID. Try including a user ID in your request or use the dropdown below."
     
-    return None, f"I couldn't find a matching user ID in your request. Available users: {', '.join(map(str, available_users[:3]))}{'...' if len(available_users) > 3 else ''}"import streamlit as st
-
-
+    available_sample = ', '.join(map(str, available_users[:3]))
+    if len(available_users) > 3:
+        available_sample += "..."
+    
+    return None, f"I couldn't find a matching user ID in your request. Available users: {available_sample}"import streamlit as st
 import pandas as pd
 import json
 import ast
